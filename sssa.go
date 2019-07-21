@@ -19,16 +19,16 @@ const (
  * created by Shamir's Secret Sharing Algorithm requring a minimum number of
  * share to recreate, of length shares, from the input secret raw as a string
 **/
-func Create(minimum int, shares int, raw string) ([]string, error) {
+func Create(minimum int, shares int, raw []byte) ([][]byte, error) {
 	// Verify minimum isn't greater than shares; there is no way to recreate
 	// the original polynomial in our current setup, therefore it doesn't make
 	// sense to generate fewer shares than are needed to reconstruct the secret.
 	if minimum > shares {
-		return []string{""}, ErrCannotRequireMoreShares
+		return nil, ErrCannotRequireMoreShares
 	}
 
 	// Convert the secret to its respective 256-bit big.Int representation
-	var secret []*big.Int = splitByteToInt([]byte(raw))
+	var secret []*big.Int = splitByteToInt(raw)
 
 	// Set constant prime across the package
 	prime, _ = big.NewInt(0).SetString(DefaultPrimeStr, 10)
@@ -71,7 +71,7 @@ func Create(minimum int, shares int, raw string) ([]string, error) {
 	//
 	// secrets[shares][parts][2]
 	var secrets [][][]*big.Int = make([][][]*big.Int, shares)
-	var result []string = make([]string, shares)
+	var result [][]byte = make([][]byte, shares)
 
 	// For every share...
 	for i := range secrets {
@@ -92,8 +92,8 @@ func Create(minimum int, shares int, raw string) ([]string, error) {
 			secrets[i][j][1] = evaluatePolynomial(polynomial[j], number)
 
 			// ...add it to results...
-			result[i] += toBase64(secrets[i][j][0])
-			result[i] += toBase64(secrets[i][j][1])
+			result[i] = append(result[i], secrets[i][j][0].Bytes()...)
+			result[i] = append(result[i], secrets[i][j][1].Bytes()...)
 		}
 	}
 
@@ -110,7 +110,7 @@ func Create(minimum int, shares int, raw string) ([]string, error) {
  *       or more are passed to this function. Passing thus does not affect it
  *       Passing fewer however, simply means that the returned secret is wrong.
 **/
-func Combine(shares []string) (string, error) {
+func Combine(shares [][]byte) ([]byte, error) {
 	// Recreate the original object of x, y points, based upon number of shares
 	// and size of each share (number of parts in the secret).
 	var secrets [][][]*big.Int = make([][][]*big.Int, len(shares))
@@ -122,21 +122,21 @@ func Combine(shares []string) (string, error) {
 	for i := range shares {
 		// ...ensure that it is valid...
 		if IsValidShare(shares[i]) == false {
-			return "", ErrOneOfTheSharesIsInvalid
+			return nil, ErrOneOfTheSharesIsInvalid
 		}
 
 		// ...find the number of parts it represents...
 		share := shares[i]
-		count := len(share) / 88
+		count := len(share) / 64
 		secrets[i] = make([][]*big.Int, count)
 
 		// ...and for each part, find the x,y pair...
 		for j := range secrets[i] {
-			cshare := share[j*88 : (j+1)*88]
+			cshare := share[j*64 : (j+1)*64]
 			secrets[i][j] = make([]*big.Int, 2)
 			// ...decoding from base 64.
-			secrets[i][j][0] = fromBase64(cshare[0:44])
-			secrets[i][j][1] = fromBase64(cshare[44:])
+			secrets[i][j][0] = big.NewInt(0).SetBytes(cshare[0:32])
+			secrets[i][j][1] = big.NewInt(0).SetBytes(cshare[32:])
 		}
 	}
 
@@ -183,7 +183,7 @@ func Combine(shares []string) (string, error) {
 	}
 
 	// ...and return the result!
-	return string(mergeIntToByte(secret)), nil
+	return mergeIntToByte(secret), nil
 }
 
 /**
@@ -195,18 +195,22 @@ func Combine(shares []string) (string, error) {
  *
  * Returns only success/failure (bool)
 **/
-func IsValidShare(candidate string) bool {
+func IsValidShare(candidate []byte) bool {
 	// Set constant prime across the package
-	prime, _ = big.NewInt(0).SetString(DefaultPrimeStr, 10)
-
-	if len(candidate)%88 != 0 {
+	if candidate == nil || string(candidate) == "" {
 		return false
 	}
 
-	count := len(candidate) / 44
+	prime, _ = big.NewInt(0).SetString(DefaultPrimeStr, 10)
+
+	if len(candidate)%64 != 0 {
+		return false
+	}
+
+	count := len(candidate) / 32
 	for j := 0; j < count; j++ {
-		part := candidate[j*44 : (j+1)*44]
-		decode := fromBase64(part)
+		part := candidate[j*32 : (j+1)*32]
+		decode := big.NewInt(0).SetBytes(part)
 		if decode.Cmp(big.NewInt(0)) == -1 || decode.Cmp(prime) == 1 {
 			return false
 		}
