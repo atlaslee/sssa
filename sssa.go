@@ -14,6 +14,16 @@ const (
 	DefaultPrimeStr = "115792089237316195423570985008687907853269984665640564039457584007913129639747"
 )
 
+func fix32(raw []byte) []byte {
+	left := 32 - len(raw)%32
+
+	if left == 32 {
+		return raw
+	}
+
+	return append(make([]byte, left), raw...)
+}
+
 /**
  * Returns a new arary of secret shares (encoding x,y pairs as base64 strings)
  * created by Shamir's Secret Sharing Algorithm requring a minimum number of
@@ -92,8 +102,8 @@ func Create(minimum int, shares int, raw []byte) ([][]byte, error) {
 			secrets[i][j][1] = evaluatePolynomial(polynomial[j], number)
 
 			// ...add it to results...
-			result[i] = append(result[i], secrets[i][j][0].Bytes()...)
-			result[i] = append(result[i], secrets[i][j][1].Bytes()...)
+			result[i] = append(result[i], fix32(secrets[i][j][0].Bytes())...)
+			result[i] = append(result[i], fix32(secrets[i][j][1].Bytes())...)
 		}
 	}
 
@@ -114,6 +124,10 @@ func Combine(shares [][]byte) ([]byte, error) {
 	// Recreate the original object of x, y points, based upon number of shares
 	// and size of each share (number of parts in the secret).
 	var secrets [][][]*big.Int = make([][][]*big.Int, len(shares))
+	if shares == nil || len(shares) == 0 {
+		//println("IsValidShare candidate failed")
+		return nil, ErrOneOfTheSharesIsInvalid
+	}
 
 	// Set constant prime
 	prime, _ = big.NewInt(0).SetString(DefaultPrimeStr, 10)
@@ -198,12 +212,14 @@ func Combine(shares [][]byte) ([]byte, error) {
 func IsValidShare(candidate []byte) bool {
 	// Set constant prime across the package
 	if candidate == nil || string(candidate) == "" {
+		//println("IsValidShare candidate failed")
 		return false
 	}
 
 	prime, _ = big.NewInt(0).SetString(DefaultPrimeStr, 10)
 
 	if len(candidate)%64 != 0 {
+		//println("IsValidShare %64 failed", len(candidate))
 		return false
 	}
 
